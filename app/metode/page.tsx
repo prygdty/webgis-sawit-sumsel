@@ -12,36 +12,34 @@ export default function MetodePage() {
   const prosesPerhitungan = async () => {
     setLoading(true);
     try {
-      const dbRes = await fetch('/api/data-sawit');
+      // 1. Ambil data mentah langsung dari GeoJSON (Biar sama persis dengan Peta!)
+      const dbRes = await fetch('/Peta_sawit_sumsel.geojson');
       
       if (!dbRes.ok) {
-        alert("Sistem gagal terhubung ke server database. Periksa koneksi API Anda.");
+        alert("Sistem gagal menemukan file peta GeoJSON.");
         setLoading(false);
         return;
       }
 
       const dbJson = await dbRes.json();
-      if (dbJson.status !== 'sukses') {
-        alert("Gagal melakukan pengambilan data dari database.");
-        setLoading(false);
-        return;
-      }
-
-      const dataAsli = dbJson.data;
+      const dataAsli = dbJson.features; // Leaflet pakai .features
+      
       if (!dataAsli || dataAsli.length === 0) {
-        alert("Data spasial tidak ditemukan. Harap pastikan basis data tidak kosong.");
+        alert("Data spasial tidak ditemukan di dalam GeoJSON.");
         setLoading(false);
         return;
       }
 
+      // 2. Format ulang data dari GeoJSON agar cocok dengan AI Python
       const dataSiapHitung = dataAsli.map((item: any) => ({
-        nama: item.name,
-        elevasi: item.elevation,
-        luas_lahan: item.area,
-        curah_hujan: item.rainfall
+        nama: item.properties.WADMKK,
+        elevasi: Number(item.properties.ELEVASI) || 0,
+        luas_lahan: Number(item.properties.LUAS_SAWIT) || 0,
+        curah_hujan: Number(item.properties.CURAH_HUJAN) || 0
       }));
 
-      const response = await fetch('http://127.0.0.1:5000/api/hitung-kmeans', {
+      // 3. Tembak data ke AI Hugging Face yang sudah ONLINE! 🚀
+      const response = await fetch('https://prygdty-geosawit-ai.hf.space/api/hitung-kmeans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ data: dataSiapHitung }) 
@@ -49,7 +47,7 @@ export default function MetodePage() {
 
       const rawText = await response.text(); 
       if (!rawText) {
-        alert("Server analitik tidak memberikan respon.");
+        alert("Server analitik Hugging Face tidak memberikan respon.");
         setLoading(false);
         return;
       }
@@ -68,7 +66,7 @@ export default function MetodePage() {
       }
 
     } catch (error) {
-      alert("Gagal mengeksekusi modul pemrosesan. Pastikan layanan backend aktif.");
+      alert("Gagal mengeksekusi modul pemrosesan. Pastikan layanan Hugging Face aktif.");
     }
     setLoading(false);
   };
@@ -112,7 +110,7 @@ export default function MetodePage() {
             className={`mb-8 px-5 py-2.5 rounded-lg text-sm font-medium text-white transition-all shadow-sm flex items-center justify-center gap-2
               ${loading ? 'bg-slate-400 cursor-not-allowed' : 'bg-emerald-700 hover:bg-emerald-800 active:scale-[0.98]'}`}
           >
-            {loading ? 'Memproses Komputasi...' : 'Jalankan Analisis Spasial'}
+            {loading ? 'Memproses Komputasi di Awam Hugging Face...' : 'Jalankan Analisis Spasial'}
           </button>
 
           {hasilClustering.length > 0 && (
