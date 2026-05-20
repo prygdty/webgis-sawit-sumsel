@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, GeoJSON, LayersControl } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useState } from 'react';
 
-// --- Algoritma K-Means ---
+// --- Algoritma K-Means (Sebagai Cadangan / Jaring Pengaman) ---
 function prosesKMeans(features: any[], k = 3) {
   const data = features.map(f => ({
     name: f.properties.WADMKK,
@@ -51,13 +51,45 @@ export default function Map({ activeCluster }: { activeCluster?: number | null }
   const [geoData, setGeoData] = useState<any>(null);
 
   useEffect(() => {
-    fetch('/Peta_sawit_sumsel.geojson')
-      .then((res) => res.json())
-      .then((data) => {
-        const clusteredFeatures = prosesKMeans(data.features, 3);
-        data.features = clusteredFeatures;
-        setGeoData(data);
-      });
+    const ambilDataAI = async () => {
+      try {
+        // 1. Ambil peta mentah dari folder publik
+        const responLokal = await fetch('/Peta_sawit_sumsel.geojson');
+        const dataLokal = await responLokal.json();
+
+        // 2. Lempar ke mesin AI Hugging Face
+        // Pastikan endpoint ini sesuai dengan route di app.py kamu (misal: /predict atau /api/cluster)
+        // Jika app.py kamu tidak pakai route khusus, coba hapus '/predict' di ujung URL-nya.
+        const responAI = await fetch('https://prygdty-geosawit-ai.hf.space/predict', {
+          method: 'POST', 
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(dataLokal) 
+        });
+
+        if (!responAI.ok) throw new Error('API Hugging Face menolak request');
+
+        // 3. Terima hasil dari AI
+        const dataMatang = await responAI.json();
+        setGeoData(dataMatang);
+        console.log("SUKSES: Peta diproses menggunakan AI Hugging Face!");
+
+      } catch (error) {
+        console.warn("AI Hugging Face gagal diakses, otomatis pakai sistem lokal cadangan...", error);
+        
+        // JARING PENGAMAN: Fallback ke K-Means Lokal
+        fetch('/Peta_sawit_sumsel.geojson')
+          .then((res) => res.json())
+          .then((data) => {
+            const clusteredFeatures = prosesKMeans(data.features, 3);
+            data.features = clusteredFeatures;
+            setGeoData(data);
+          });
+      }
+    };
+
+    ambilDataAI();
   }, []);
 
   const style = (feature: any) => {
@@ -67,7 +99,7 @@ export default function Map({ activeCluster }: { activeCluster?: number | null }
     const colors = ['#10b981', '#f59e0b', '#ef4444']; // Emerald, Amber, Red
 
     return {
-      fillColor: colors[cluster],
+      fillColor: colors[cluster] || '#94a3b8', // Default warna abu jika cluster tidak terbaca
       weight: isHighlighted ? 3 : 1.5,
       opacity: isFaded ? 0.3 : 1,
       color: isHighlighted ? '#0f172a' : 'white',
@@ -80,9 +112,12 @@ export default function Map({ activeCluster }: { activeCluster?: number | null }
     const colors = ['#10b981', '#f59e0b', '#ef4444'];
     const clusterName = ['Kawasan Emas', 'Kawasan Berkembang', 'Kawasan Terbatas'];
     
+    // Fallback jika property cluster belum ada (mencegah error popup)
+    const clusIdx = p.cluster !== undefined ? p.cluster : 0;
+    
     const popupContent = `
       <div style="font-family: sans-serif; min-width: 220px; padding: 5px;">
-        <h3 style="margin: 0 0 10px 0; border-bottom: 2px solid ${colors[p.cluster]}; padding-bottom: 8px; color: #1e293b; font-weight: 800; font-size: 14px; text-transform: uppercase;">
+        <h3 style="margin: 0 0 10px 0; border-bottom: 2px solid ${colors[clusIdx]}; padding-bottom: 8px; color: #1e293b; font-weight: 800; font-size: 14px; text-transform: uppercase;">
           KAB. ${p.WADMKK}
         </h3>
         <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 12px; border-bottom: 1px dashed #cbd5e1; padding-bottom: 4px;">
@@ -91,15 +126,15 @@ export default function Map({ activeCluster }: { activeCluster?: number | null }
         </div>
         <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 12px; border-bottom: 1px dashed #cbd5e1; padding-bottom: 4px;">
           <span style="color: #64748b; font-weight: bold;">🌴 Luas Lahan:</span> 
-          <span style="color: #0f172a; font-weight: 800;">${p.LUAS_SAWIT.toLocaleString('id-ID')} Ha</span>
+          <span style="color: #0f172a; font-weight: 800;">${p.LUAS_SAWIT ? p.LUAS_SAWIT.toLocaleString('id-ID') : 0} Ha</span>
         </div>
         <div style="display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 12px;">
           <span style="color: #64748b; font-weight: bold;">🌧️ Curah Hujan:</span> 
           <span style="color: #0f172a; font-weight: 800;">${p.CURAH_HUJAN} mm</span>
         </div>
         
-        <div style="padding: 6px; background: ${colors[p.cluster]}; color: white; text-align: center; border-radius: 6px; font-weight: bold; font-size: 11px; letter-spacing: 1px; text-transform: uppercase;">
-          ${clusterName[p.cluster]}
+        <div style="padding: 6px; background: ${colors[clusIdx]}; color: white; text-align: center; border-radius: 6px; font-weight: bold; font-size: 11px; letter-spacing: 1px; text-transform: uppercase;">
+          ${clusterName[clusIdx]}
         </div>
       </div>
     `;
@@ -109,7 +144,6 @@ export default function Map({ activeCluster }: { activeCluster?: number | null }
   return (
     <div style={{ height: '600px', width: '100%', zIndex: 0 }}>
       <MapContainer center={[-3.3194, 104.9147]} zoom={7} style={{ height: '100%', width: '100%' }}>
-        {/* FITUR KOTAK CEKLIS (LAYER CONTROL) SEPERTI DI REFERENSI */}
         <LayersControl position="topright">
           {/* Pilihan Base Map (Radio Button) */}
           <LayersControl.BaseLayer checked name="🌐 OpenStreetMap (OSM)">
