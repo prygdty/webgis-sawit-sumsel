@@ -53,32 +53,50 @@ export default function Map({ activeCluster }: { activeCluster?: number | null }
   useEffect(() => {
     const ambilDataAI = async () => {
       try {
-        // 1. Ambil peta mentah dari folder publik
+        // 1. Ambil peta mentah
         const responLokal = await fetch('/Peta_sawit_sumsel.geojson');
         const dataLokal = await responLokal.json();
 
-        // 2. Lempar ke mesin AI Hugging Face
-        // Pastikan endpoint ini sesuai dengan route di app.py kamu (misal: /predict atau /api/cluster)
-        // Jika app.py kamu tidak pakai route khusus, coba hapus '/predict' di ujung URL-nya.
-        const responAI = await fetch('https://prygdty-geosawit-ai.hf.space/predict', {
+        // 2. Format ulang data agar dipahami oleh app.py kamu
+        const dataUntukAI = dataLokal.features.map((f: any) => ({
+          nama: f.properties.WADMKK,
+          elevasi: Number(f.properties.ELEVASI) || 0,
+          luas_lahan: Number(f.properties.LUAS_SAWIT) || 0,
+          curah_hujan: Number(f.properties.CURAH_HUJAN) || 0
+        }));
+
+        // 3. Tembak ke endpoint AI yang BENAR (/api/hitung-kmeans)
+        const responAI = await fetch('https://prygdty-geosawit-ai.hf.space/api/hitung-kmeans', {
           method: 'POST', 
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(dataLokal) 
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: dataUntukAI }) 
         });
 
         if (!responAI.ok) throw new Error('API Hugging Face menolak request');
 
-        // 3. Terima hasil dari AI
-        const dataMatang = await responAI.json();
-        setGeoData(dataMatang);
-        console.log("SUKSES: Peta diproses menggunakan AI Hugging Face!");
+        const hasilAI = await responAI.json();
+
+        // 4. Jika sukses, pasangkan cluster dari AI ke peta GeoJSON
+        if (hasilAI.status === 'sukses') {
+          dataLokal.features.forEach((feature: any) => {
+            // Cari data cluster wilayah ini dari jawaban AI
+            const titikAI = hasilAI.titik_plot.find((t: any) => t.nama === feature.properties.WADMKK);
+            if (titikAI) {
+              // Di AI kamu pakai cluster 1, 2, 3. Peta butuh index 0, 1, 2. (Maka dikurangi 1)
+              feature.properties.cluster = titikAI.clusterId - 1; 
+            }
+          });
+          
+          setGeoData({...dataLokal}); // Munculkan ke peta!
+          console.log("SUKSES BOS!: Peta telah diwarnai menggunakan Mesin AI K-Means Geo Sawit 🚀");
+        } else {
+          throw new Error(hasilAI.pesan);
+        }
 
       } catch (error) {
         console.warn("AI Hugging Face gagal diakses, otomatis pakai sistem lokal cadangan...", error);
         
-        // JARING PENGAMAN: Fallback ke K-Means Lokal
+        // JARING PENGAMAN: Fallback K-Means Lokal
         fetch('/Peta_sawit_sumsel.geojson')
           .then((res) => res.json())
           .then((data) => {
@@ -99,7 +117,7 @@ export default function Map({ activeCluster }: { activeCluster?: number | null }
     const colors = ['#10b981', '#f59e0b', '#ef4444']; // Emerald, Amber, Red
 
     return {
-      fillColor: colors[cluster] || '#94a3b8', // Default warna abu jika cluster tidak terbaca
+      fillColor: colors[cluster] || '#94a3b8', 
       weight: isHighlighted ? 3 : 1.5,
       opacity: isFaded ? 0.3 : 1,
       color: isHighlighted ? '#0f172a' : 'white',
@@ -112,7 +130,6 @@ export default function Map({ activeCluster }: { activeCluster?: number | null }
     const colors = ['#10b981', '#f59e0b', '#ef4444'];
     const clusterName = ['Kawasan Emas', 'Kawasan Berkembang', 'Kawasan Terbatas'];
     
-    // Fallback jika property cluster belum ada (mencegah error popup)
     const clusIdx = p.cluster !== undefined ? p.cluster : 0;
     
     const popupContent = `
@@ -145,7 +162,6 @@ export default function Map({ activeCluster }: { activeCluster?: number | null }
     <div style={{ height: '600px', width: '100%', zIndex: 0 }}>
       <MapContainer center={[-3.3194, 104.9147]} zoom={7} style={{ height: '100%', width: '100%' }}>
         <LayersControl position="topright">
-          {/* Pilihan Base Map (Radio Button) */}
           <LayersControl.BaseLayer checked name="🌐 OpenStreetMap (OSM)">
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; OSM' />
           </LayersControl.BaseLayer>
@@ -153,7 +169,6 @@ export default function Map({ activeCluster }: { activeCluster?: number | null }
             <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" attribution='Tiles &copy; Esri' />
           </LayersControl.BaseLayer>
 
-          {/* Pilihan Layer Data (Ceklis) */}
           {geoData && (
             <LayersControl.Overlay checked name="🗺️ Batas Administrasi K-Means">
               <GeoJSON 
