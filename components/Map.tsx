@@ -11,18 +11,25 @@ function prosesKMeans(features: any[], k = 3) {
     elevasi: Number(f.properties.ELEVASI) || 0,
     luas: Number(f.properties.LUAS_SAWIT) || 0,
     hujan: Number(f.properties.CURAH_HUJAN) || 0,
-    feature: f
+    feature: f,
+    nE: 0, // Ditambahkan agar TypeScript Vercel tidak error
+    nL: 0, // Ditambahkan agar TypeScript Vercel tidak error
+    nH: 0  // Ditambahkan agar TypeScript Vercel tidak error
   }));
+
   const maxE = Math.max(...data.map(d => d.elevasi)), minE = Math.min(...data.map(d => d.elevasi));
   const maxL = Math.max(...data.map(d => d.luas)), minL = Math.min(...data.map(d => d.luas));
   const maxH = Math.max(...data.map(d => d.hujan)), minH = Math.min(...data.map(d => d.hujan));
+  
   data.forEach(d => {
     d.nE = (d.elevasi - minE) / (maxE - minE || 1);
     d.nL = (d.luas - minL) / (maxL - minL || 1);
     d.nH = (d.hujan - minH) / (maxH - minH || 1);
   });
+  
   let centroids = data.slice(0, k).map(d => ({ e: d.nE, l: d.nL, h: d.nH }));
   let assignments = new Array(data.length).fill(-1);
+  
   for (let iter = 0; iter < 10; iter++) {
     let changed = false;
     data.forEach((d, i) => {
@@ -65,7 +72,7 @@ export default function Map({ activeCluster }: { activeCluster?: number | null }
           curah_hujan: Number(f.properties.CURAH_HUJAN) || 0
         }));
 
-        // 3. Tembak ke endpoint AI yang BENAR (/api/hitung-kmeans)
+        // 3. Tembak ke endpoint AI
         const responAI = await fetch('https://prygdty-geosawit-ai.hf.space/api/hitung-kmeans', {
           method: 'POST', 
           headers: { 'Content-Type': 'application/json' },
@@ -79,15 +86,13 @@ export default function Map({ activeCluster }: { activeCluster?: number | null }
         // 4. Jika sukses, pasangkan cluster dari AI ke peta GeoJSON
         if (hasilAI.status === 'sukses') {
           dataLokal.features.forEach((feature: any) => {
-            // Cari data cluster wilayah ini dari jawaban AI
             const titikAI = hasilAI.titik_plot.find((t: any) => t.nama === feature.properties.WADMKK);
             if (titikAI) {
-              // Di AI kamu pakai cluster 1, 2, 3. Peta butuh index 0, 1, 2. (Maka dikurangi 1)
               feature.properties.cluster = titikAI.clusterId - 1; 
             }
           });
           
-          setGeoData({...dataLokal}); // Munculkan ke peta!
+          setGeoData({...dataLokal}); 
           console.log("SUKSES BOS!: Peta telah diwarnai menggunakan Mesin AI K-Means Geo Sawit 🚀");
         } else {
           throw new Error(hasilAI.pesan);
